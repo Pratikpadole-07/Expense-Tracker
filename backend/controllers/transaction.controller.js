@@ -1,6 +1,7 @@
 const Transaction = require("../models/Transaction");
 const { Parser } = require("json2csv");
 const PDFDocument = require("pdfkit");
+const mongoose = require("mongoose");
 
 exports.addTransaction = async (req, res) => {
   const { type, amount, category, description, date } = req.body;
@@ -54,7 +55,7 @@ exports.getMonthlySummary = async (req, res) => {
   const summary = await Transaction.aggregate([
     {
       $match: {
-        userId: req.user.id
+        userId: new mongoose.Types.ObjectId(req.user.id)
       }
     },
     {
@@ -66,12 +67,6 @@ exports.getMonthlySummary = async (req, res) => {
         },
         total: { $sum: "$amount" }
       }
-    },
-    {
-      $sort: {
-        "_id.year": 1,
-        "_id.month": 1
-      }
     }
   ]);
 
@@ -82,7 +77,7 @@ exports.getCategorySummary = async (req, res) => {
   const summary = await Transaction.aggregate([
     {
       $match: {
-        userId: req.user.id,
+        userId: new mongoose.Types.ObjectId(req.user.id),
         type: "expense"
       }
     },
@@ -91,9 +86,6 @@ exports.getCategorySummary = async (req, res) => {
         _id: "$category",
         total: { $sum: "$amount" }
       }
-    },
-    {
-      $sort: { total: -1 }
     }
   ]);
 
@@ -105,7 +97,7 @@ exports.getIncomeExpenseSummary = async (req, res) => {
   const summary = await Transaction.aggregate([
     {
       $match: {
-        userId: req.user.id
+        userId: new mongoose.Types.ObjectId(req.user.id)
       }
     },
     {
@@ -158,7 +150,9 @@ exports.exportTransactionsCSV = async (req, res) => {
 exports.exportTransactionsPDF = async (req, res) => {
   const { from, to, type, category } = req.query;
 
-  const query = { userId: req.user.id };
+  const query = {
+    userId: new mongoose.Types.ObjectId(req.user.id)
+  };
 
   if (type) query.type = type;
   if (category) query.category = category;
@@ -173,41 +167,94 @@ exports.exportTransactionsPDF = async (req, res) => {
     .sort({ date: -1 })
     .lean();
 
-  const doc = new PDFDocument({ margin: 40, size: "A4" });
+  const doc = new PDFDocument({ size: "A4", margin: 40 });
 
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
     "Content-Disposition",
-    "attachment; filename=transactions.pdf"
+    "attachment; filename=expense-report.pdf"
   );
 
   doc.pipe(res);
 
-  // Title
-  doc.fontSize(18).text("Expense Tracker Report", { align: "center" });
-  doc.moveDown();
+  /* ---------- HEADER ---------- */
+  doc
+    .fontSize(20)
+    .text("Expense Tracker Report", { align: "center" });
 
-  // Table Header
-  doc.fontSize(12);
-  doc.text("Date", 40);
-  doc.text("Type", 120);
-  doc.text("Category", 200);
-  doc.text("Amount", 320);
-  doc.text("Description", 400);
-  doc.moveDown();
-
-  doc.moveTo(40, doc.y).lineTo(550, doc.y).stroke();
   doc.moveDown(0.5);
 
-  // Table Rows
+  doc
+    .fontSize(10)
+    .fillColor("gray")
+    .text(
+      `Generated on: ${new Date().toLocaleDateString()}`,
+      { align: "center" }
+    );
+
+  doc.moveDown();
+
+  /* ---------- FILTER INFO ---------- */
+  doc
+    .fillColor("black")
+    .fontSize(11)
+    .text(
+      `Filters: ${
+        type || category || from || to
+          ? `${type || "All"} | ${category || "All"} | ${from || "Any"} to ${to || "Any"}`
+          : "None"
+      }`
+    );
+
+  doc.moveDown();
+
+  /* ---------- TABLE HEADER ---------- */
+  const startY = doc.y;
+
+  doc.fontSize(11).font("Helvetica-Bold");
+  doc.text("Date", 40, startY);
+  doc.text("Type", 110, startY);
+  doc.text("Category", 170, startY);
+  doc.text("Amount", 300, startY);
+  doc.text("Description", 370, startY);
+
+  doc.moveTo(40, startY + 15).lineTo(550, startY + 15).stroke();
+
+  doc.font("Helvetica");
+
+  /* ---------- TABLE ROWS ---------- */
+  let y = startY + 25;
+  let totalIncome = 0;
+  let totalExpense = 0;
+
   transactions.forEach(t => {
-    doc.text(t.date.toISOString().split("T")[0], 40);
-    doc.text(t.type, 120);
-    doc.text(t.category, 200);
-    doc.text(t.amount.toString(), 320);
-    doc.text(t.description || "-", 400);
-    doc.moveDown();
+    if (y > 750) {
+      doc.addPage();
+      y = 50;
+    }
+
+    doc.fontSize(10);
+    doc.text(new Date(t.date).toLocaleDateString(), 40, y);
+    doc.text(t.type, 110, y);
+    doc.text(t.category, 170, y);
+    doc.text(`Rs. ${t.amount}`, 300, y);
+    doc.text(t.description || "-", 370, y, { width: 170 });
+
+    if (t.type === "income") totalIncome += t.amount;
+    else totalExpense += t.amount;
+
+    y += 18;
   });
+
+  /* ---------- TOTALS ---------- */
+  doc.moveDown(2);
+  doc.moveTo(40, doc.y).lineTo(550, doc.y).stroke();
+  doc.moveDown();
+
+  doc.font("Helvetica-Bold").fontSize(12);
+  doc.text(`Total Income: Rs. ${totalIncome}`);
+  doc.text(`Total Expense: Rs. ${totalExpense}`);
+  doc.text(`Balance: Rs. ${totalIncome - totalExpense}`);
 
   doc.end();
 };

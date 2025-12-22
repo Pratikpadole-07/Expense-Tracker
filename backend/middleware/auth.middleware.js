@@ -1,21 +1,28 @@
-const jwt=require("jsonwebtoken");
+const jwt = require("jsonwebtoken");
 
+module.exports = (req, res, next) => {
+  let token = null;
 
-module.exports=(req,res,next) =>{
+  // 1️⃣ Authorization header
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.split(" ")[1];
+  }
 
-    const authHeader=req.headers.authorization;
+  // 2️⃣ Query param (for file downloads)
+  if (!token && req.query.token) {
+    token = req.query.token;
+  }
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  if (!token) {
     return res.status(401).json({ message: "No token provided" });
-    }
+  }
 
-    const token = authHeader.split(" ")[1];
-
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = decoded;
-      next();
-    } catch (error) {
-      res.status(401).json({ message: "Invalid token" });
-    }
-}
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = { id: decoded.id };
+    next();
+  } catch (err) {
+    return res.status(401).json({ message: "Invalid token" });
+  }
+};
