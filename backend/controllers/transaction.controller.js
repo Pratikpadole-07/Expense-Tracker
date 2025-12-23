@@ -2,6 +2,7 @@ const Transaction = require("../models/Transaction");
 const { Parser } = require("json2csv");
 const PDFDocument = require("pdfkit");
 const mongoose = require("mongoose");
+const cloudinary = require("../config/cloudinary");
 
 exports.addTransaction = async (req, res) => {
   const { type, amount, category, description, date } = req.body;
@@ -21,6 +22,43 @@ exports.addTransaction = async (req, res) => {
 
   res.status(201).json(transaction);
 };
+
+
+exports.createTransaction = async (req, res) => {
+  try {
+    const { type, amount, category, description, date } = req.body;
+
+    let receiptUrl = null;
+
+    if (req.file) {
+      const uploadResult = await cloudinary.uploader.upload_stream(
+        { folder: "expense-receipts" },
+        async (error, result) => {
+          if (error) throw error;
+          receiptUrl = result.secure_url;
+        }
+      );
+
+      uploadResult.end(req.file.buffer);
+    }
+
+    const transaction = await Transaction.create({
+      userId: req.user.id,
+      type,
+      amount,
+      category,
+      description,
+      date,
+      receiptUrl
+    });
+
+    res.status(201).json(transaction);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to create transaction" });
+  }
+};
+
 
 exports.getTransactions = async (req, res) => {
   const { from, to, type, category, page = 1, limit = 10 } = req.query;

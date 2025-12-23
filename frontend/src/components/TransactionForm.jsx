@@ -6,40 +6,52 @@ const TransactionForm = ({ onSuccess }) => {
     type: "expense",
     amount: "",
     category: "",
-    description: ""
+    description: "",
+    receipt: null
   });
 
   const [loading, setLoading] = useState(false);
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value, files } = e.target;
+
+    if (name === "receipt") {
+      setForm({ ...form, receipt: files[0] });
+    } else {
+      setForm({ ...form, [name]: value });
+    }
   };
 
   const submit = async (e) => {
     e.preventDefault();
 
-    if (!form.amount || !form.category) {
-      return;
-    }
+    if (!form.amount || !form.category) return;
 
     try {
       setLoading(true);
 
-      await api.post("/transactions", {
-        ...form,
-        amount: Number(form.amount),
-        date: new Date()
-      });
+      const formData = new FormData();
+      formData.append("type", form.type);
+      formData.append("amount", Number(form.amount));
+      formData.append("category", form.category);
+      formData.append("description", form.description);
+      formData.append("date", new Date().toISOString());
+
+      if (form.receipt) {
+        formData.append("receipt", form.receipt);
+      }
+
+      await api.post("/transactions", formData);
 
       // reset form
       setForm({
         type: "expense",
         amount: "",
         category: "",
-        description: ""
+        description: "",
+        receipt: null
       });
 
-      // notify dashboard to refresh charts + list
       onSuccess();
     } catch (err) {
       console.error("Add transaction failed", err);
@@ -86,6 +98,15 @@ const TransactionForm = ({ onSuccess }) => {
           value={form.description}
           placeholder="Description (optional)"
           className="w-full border rounded-lg px-3 py-2"
+          onChange={handleChange}
+        />
+
+        {/* RECEIPT UPLOAD */}
+        <input
+          type="file"
+          name="receipt"
+          accept="image/*"
+          className="w-full text-sm"
           onChange={handleChange}
         />
 

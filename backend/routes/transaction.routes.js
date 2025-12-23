@@ -6,8 +6,10 @@ const {
   getCategorySummary,
   getIncomeExpenseSummary,
   exportTransactionsCSV,
-  exportTransactionsPDF
+  exportTransactionsPDF,
+  createTransaction
 } = require("../controllers/transaction.controller");
+const upload = require("../middleware/upload.middleware");
 
 const auth = require("../middleware/auth.middleware");
 
@@ -20,5 +22,5 @@ router.get("/summary/category", auth, getCategorySummary);
 router.get("/summary/income-expense", auth, getIncomeExpenseSummary);
 router.get("/export/csv", auth, exportTransactionsCSV);
 router.get("/export/pdf", auth, exportTransactionsPDF);
-
+router.post("/",auth,upload.single("receipt"),createTransaction);
 module.exports = router;

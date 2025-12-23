@@ -23,7 +23,11 @@ const transactionSchema=new mongoose.Schema({
   date: {
     type: Date,
     required: true
+  },
+  receiptUrl: {
+  type: String
   }
+
 }, { timestamps: true });
 
 module.exports=mongoose.model("Transaction",transactionSchema);
