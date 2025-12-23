@@ -1,5 +1,7 @@
 import { useState } from "react";
 import api from "../api/api";
+import { extractTextFromImage } from "../utils/ocr";
+import { parseReceiptText } from "../utils/receiptParser";
 
 const TransactionForm = ({ onSuccess }) => {
   const [form, setForm] = useState({
@@ -11,21 +13,45 @@ const TransactionForm = ({ onSuccess }) => {
   });
 
   const [loading, setLoading] = useState(false);
+  const [ocrText, setOcrText] = useState("");
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState(null);
 
   const handleChange = (e) => {
     const { name, value, files } = e.target;
 
     if (name === "receipt") {
-      setForm({ ...form, receipt: files[0] });
+      const file = files[0];
+      setForm(prev => ({ ...prev, receipt: file }));
+
+      setOcrLoading(true);
+      extractTextFromImage(file)
+        .then(text => {
+          setOcrText(text);
+          const parsed = parseReceiptText(text);
+          setSuggestions(parsed);
+
+          setForm(prev => ({
+            ...prev,
+            amount:
+              parsed.amount !== null && !isNaN(parsed.amount)
+                ? parsed.amount
+                : prev.amount,
+            category: parsed.category || prev.category,
+            description: parsed.merchant || prev.description
+          }));
+        })
+        .finally(() => setOcrLoading(false));
     } else {
-      setForm({ ...form, [name]: value });
+      setForm(prev => ({ ...prev, [name]: value }));
     }
   };
 
   const submit = async (e) => {
     e.preventDefault();
 
-    if (!form.amount || !form.category) return;
+    // strict but correct validation
+    if (form.amount === "" || !form.category) return;
 
     try {
       setLoading(true);
@@ -43,7 +69,6 @@ const TransactionForm = ({ onSuccess }) => {
 
       await api.post("/transactions", formData);
 
-      // reset form
       setForm({
         type: "expense",
         amount: "",
@@ -51,6 +76,8 @@ const TransactionForm = ({ onSuccess }) => {
         description: "",
         receipt: null
       });
+      setOcrText("");
+      setSuggestions(null);
 
       onSuccess();
     } catch (err) {
@@ -101,14 +128,30 @@ const TransactionForm = ({ onSuccess }) => {
           onChange={handleChange}
         />
 
-        {/* RECEIPT UPLOAD */}
         <input
           type="file"
           name="receipt"
           accept="image/*"
-          className="w-full text-sm"
           onChange={handleChange}
         />
+
+        {ocrLoading && (
+          <p className="text-sm text-slate-500">
+            Reading receipt...
+          </p>
+        )}
+
+        {ocrText && (
+          <div className="border rounded-lg p-3 text-xs bg-slate-50 max-h-40 overflow-auto">
+            <pre className="whitespace-pre-wrap">{ocrText}</pre>
+          </div>
+        )}
+
+        {suggestions && (
+          <p className="text-xs text-green-600">
+            Fields auto-suggested from receipt. Please verify.
+          </p>
+        )}
 
         <button
           disabled={loading}
