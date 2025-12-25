@@ -9,6 +9,7 @@ const TransactionForm = ({ onSuccess }) => {
     amount: "",
     category: "",
     description: "",
+    date: "",
     receipt: null
   });
 
@@ -50,8 +51,15 @@ const TransactionForm = ({ onSuccess }) => {
   const submit = async (e) => {
     e.preventDefault();
 
-    // strict but correct validation
-    if (form.amount === "" || !form.category) return;
+    // HARD validation (correct)
+    if (
+      form.amount === "" ||
+      isNaN(Number(form.amount)) ||
+      !form.category ||
+      !form.date
+    ) {
+      return;
+    }
 
     try {
       setLoading(true);
@@ -61,7 +69,7 @@ const TransactionForm = ({ onSuccess }) => {
       formData.append("amount", Number(form.amount));
       formData.append("category", form.category);
       formData.append("description", form.description);
-      formData.append("date", new Date().toISOString());
+      formData.append("date", form.date); // 🔥 USER DATE
 
       if (form.receipt) {
         formData.append("receipt", form.receipt);
@@ -74,11 +82,12 @@ const TransactionForm = ({ onSuccess }) => {
         amount: "",
         category: "",
         description: "",
+        date: "",
         receipt: null
       });
+
       setOcrText("");
       setSuggestions(null);
-
       onSuccess();
     } catch (err) {
       console.error("Add transaction failed", err);
@@ -128,6 +137,16 @@ const TransactionForm = ({ onSuccess }) => {
           onChange={handleChange}
         />
 
+        {/* DATE IS MANDATORY */}
+        <input
+          type="date"
+          name="date"
+          value={form.date}
+          onChange={handleChange}
+          className="w-full border rounded-lg px-3 py-2"
+        />
+
+        {/* RECEIPT */}
         <input
           type="file"
           name="receipt"

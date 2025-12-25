@@ -11,22 +11,34 @@ exports.createTransaction = async (req, res) => {
   try {
     const { type, amount, category, description, date } = req.body;
 
-    if (!type || !amount || !category || !date) {
+    // presence validation
+    if (!type || amount == null || !category || !date) {
       return res.status(400).json({ message: "Missing fields" });
     }
 
+    // type validation
+    if (!["income", "expense"].includes(type)) {
+      return res.status(400).json({ message: "Invalid transaction type" });
+    }
+
+    // amount validation
+    const numericAmount = Number(amount);
+    if (isNaN(numericAmount) || numericAmount <= 0) {
+      return res.status(400).json({ message: "Amount must be greater than zero" });
+    }
+
+    const normalizedCategory = category.trim();
+
     let receiptUrl = null;
 
-    // handle receipt upload
     if (req.file) {
       const uploadResult = await new Promise((resolve, reject) => {
-        cloudinary.uploader.upload_stream(
-          { folder: "expense-receipts" },
-          (error, result) => {
-            if (error) reject(error);
+        cloudinary.uploader
+          .upload_stream({ folder: "expense-receipts" }, (err, result) => {
+            if (err) reject(err);
             else resolve(result);
-          }
-        ).end(req.file.buffer);
+          })
+          .end(req.file.buffer);
       });
 
       receiptUrl = uploadResult.secure_url;
@@ -35,17 +47,17 @@ exports.createTransaction = async (req, res) => {
     const transaction = await Transaction.create({
       userId: new mongoose.Types.ObjectId(req.user.id),
       type,
-      amount: Number(amount),
-      category,
+      amount: numericAmount,
+      category: normalizedCategory,
       description,
       date: new Date(date),
       receiptUrl
     });
 
-    res.status(201).json(transaction);
+    return res.status(201).json(transaction);
   } catch (err) {
     console.error("CREATE TRANSACTION ERROR:", err);
-    res.status(500).json({ message: "Failed to create transaction" });
+    return res.status(500).json({ message: "Failed to create transaction" });
   }
 };
 
@@ -60,7 +72,7 @@ exports.getTransactions = async (req, res) => {
   };
 
   if (type) query.type = type;
-  if (category) query.category = category;
+  if (category) query.category = category.trim();
 
   if (from || to) {
     query.date = {};
@@ -70,10 +82,48 @@ exports.getTransactions = async (req, res) => {
 
   const transactions = await Transaction.find(query)
     .sort({ date: -1 })
-    .skip((page - 1) * limit)
+    .skip((Number(page) - 1) * Number(limit))
     .limit(Number(limit));
 
   res.json(transactions);
+};
+
+/* =========================
+   SUMMARY (USED BY DASHBOARD)
+   ========================= */
+exports.getSummary = async (req, res) => {
+  try {
+    const data = await Transaction.aggregate([
+      {
+        $match: {
+          userId: new mongoose.Types.ObjectId(req.user.id)
+        }
+      },
+      {
+        $group: {
+          _id: "$type",
+          total: { $sum: "$amount" }
+        }
+      }
+    ]);
+
+    let income = 0;
+    let expense = 0;
+
+    data.forEach(d => {
+      if (d._id === "income") income = d.total;
+      if (d._id === "expense") expense = d.total;
+    });
+
+    res.json({
+      income,
+      expense,
+      balance: income - expense
+    });
+  } catch (err) {
+    console.error("SUMMARY ERROR:", err);
+    res.status(500).json({ message: "Failed to load summary" });
+  }
 };
 
 /* =========================
@@ -81,17 +131,8 @@ exports.getTransactions = async (req, res) => {
    ========================= */
 exports.getIncomeExpenseSummary = async (req, res) => {
   const summary = await Transaction.aggregate([
-    {
-      $match: {
-        userId: new mongoose.Types.ObjectId(req.user.id)
-      }
-    },
-    {
-      $group: {
-        _id: "$type",
-        total: { $sum: "$amount" }
-      }
-    }
+    { $match: { userId: new mongoose.Types.ObjectId(req.user.id) } },
+    { $group: { _id: "$type", total: { $sum: "$amount" } } }
   ]);
 
   res.json(summary);
@@ -105,12 +146,7 @@ exports.getCategorySummary = async (req, res) => {
         type: "expense"
       }
     },
-    {
-      $group: {
-        _id: "$category",
-        total: { $sum: "$amount" }
-      }
-    }
+    { $group: { _id: "$category", total: { $sum: "$amount" } } }
   ]);
 
   res.json(summary);
@@ -118,11 +154,7 @@ exports.getCategorySummary = async (req, res) => {
 
 exports.getMonthlySummary = async (req, res) => {
   const summary = await Transaction.aggregate([
-    {
-      $match: {
-        userId: new mongoose.Types.ObjectId(req.user.id)
-      }
-    },
+    { $match: { userId: new mongoose.Types.ObjectId(req.user.id) } },
     {
       $group: {
         _id: {
@@ -138,101 +170,99 @@ exports.getMonthlySummary = async (req, res) => {
   res.json(summary);
 };
 
-/* =========================
-   CSV EXPORT
-   ========================= */
+
 exports.exportTransactionsCSV = async (req, res) => {
-  const { from, to, type, category } = req.query;
+  try {
+    const { from, to, type, category } = req.query;
 
-  const query = {
-    userId: new mongoose.Types.ObjectId(req.user.id)
-  };
+    const query = { userId: new mongoose.Types.ObjectId(req.user.id) };
 
-  if (type) query.type = type;
-  if (category) query.category = category;
+    if (type) query.type = type;
+    if (category) query.category = category.trim();
 
-  if (from || to) {
-    query.date = {};
-    if (from) query.date.$gte = new Date(from);
-    if (to) query.date.$lte = new Date(to);
-  }
-
-  const transactions = await Transaction.find(query).sort({ date: -1 }).lean();
-
-  const fields = [
-    { label: "Date", value: row => row.date.toISOString().split("T")[0] },
-    { label: "Type", value: "type" },
-    { label: "Category", value: "category" },
-    { label: "Amount", value: "amount" },
-    { label: "Description", value: "description" }
-  ];
-
-  const parser = new Parser({ fields });
-  const csv = parser.parse(transactions);
-
-  res.header("Content-Type", "text/csv");
-  res.attachment("transactions.csv");
-  res.send(csv);
-};
-
-/* =========================
-   PDF EXPORT
-   ========================= */
-exports.exportTransactionsPDF = async (req, res) => {
-  const { from, to, type, category } = req.query;
-
-  const query = {
-    userId: new mongoose.Types.ObjectId(req.user.id)
-  };
-
-  if (type) query.type = type;
-  if (category) query.category = category;
-
-  if (from || to) {
-    query.date = {};
-    if (from) query.date.$gte = new Date(from);
-    if (to) query.date.$lte = new Date(to);
-  }
-
-  const transactions = await Transaction.find(query).sort({ date: -1 }).lean();
-
-  const doc = new PDFDocument({ size: "A4", margin: 40 });
-
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", "attachment; filename=expense-report.pdf");
-
-  doc.pipe(res);
-
-  doc.fontSize(20).text("Expense Tracker Report", { align: "center" });
-  doc.moveDown();
-
-  let y = doc.y + 10;
-  let totalIncome = 0;
-  let totalExpense = 0;
-
-  transactions.forEach(t => {
-    if (y > 750) {
-      doc.addPage();
-      y = 50;
+    if (from || to) {
+      query.date = {};
+      if (from) query.date.$gte = new Date(from);
+      if (to) query.date.$lte = new Date(to);
     }
 
-    doc.fontSize(10);
-    doc.text(new Date(t.date).toLocaleDateString(), 40, y);
-    doc.text(t.type, 120, y);
-    doc.text(t.category, 200, y);
-    doc.text(`Rs. ${t.amount}`, 300, y);
-    doc.text(t.description || "-", 370, y, { width: 170 });
+    const transactions = await Transaction.find(query)
+      .sort({ date: -1 })
+      .lean();
 
-    if (t.type === "income") totalIncome += t.amount;
-    else totalExpense += t.amount;
+    const fields = [
+      { label: "Date", value: row => row.date.toISOString().split("T")[0] },
+      { label: "Type", value: "type" },
+      { label: "Category", value: "category" },
+      { label: "Amount", value: "amount" },
+      { label: "Description", value: "description" }
+    ];
 
-    y += 18;
-  });
+    const parser = new Parser({ fields });
+    const csv = parser.parse(transactions);
 
-  doc.moveDown();
-  doc.fontSize(12).text(`Total Income: Rs. ${totalIncome}`);
-  doc.text(`Total Expense: Rs. ${totalExpense}`);
-  doc.text(`Balance: Rs. ${totalIncome - totalExpense}`);
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", "attachment; filename=transactions.csv");
+    res.status(200).send(csv);
+  } catch (err) {
+    console.error("CSV EXPORT ERROR:", err);
+    res.status(500).json({ message: "Failed to export CSV" });
+  }
+};
 
-  doc.end();
+
+exports.exportTransactionsPDF = async (req, res) => {
+  try {
+    const { from, to, type, category } = req.query;
+
+    const query = { userId: new mongoose.Types.ObjectId(req.user.id) };
+
+    if (type) query.type = type;
+    if (category) query.category = category.trim();
+
+    if (from || to) {
+      query.date = {};
+      if (from) query.date.$gte = new Date(from);
+      if (to) query.date.$lte = new Date(to);
+    }
+
+    const transactions = await Transaction.find(query)
+      .sort({ date: -1 })
+      .lean();
+
+    const doc = new PDFDocument({ size: "A4", margin: 40 });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      "attachment; filename=expense-report.pdf"
+    );
+
+    doc.pipe(res);
+
+    doc.fontSize(20).text("Expense Report", { align: "center" });
+    doc.moveDown();
+
+    let totalIncome = 0;
+    let totalExpense = 0;
+
+    transactions.forEach(t => {
+      doc.fontSize(10).text(
+        `${new Date(t.date).toLocaleDateString()} | ${t.type} | ${t.category} | ₹${t.amount}`
+      );
+
+      if (t.type === "income") totalIncome += t.amount;
+      else totalExpense += t.amount;
+    });
+
+    doc.moveDown();
+    doc.fontSize(12).text(`Total Income: ₹${totalIncome}`);
+    doc.text(`Total Expense: ₹${totalExpense}`);
+    doc.text(`Balance: ₹${totalIncome - totalExpense}`);
+
+    doc.end();
+  } catch (err) {
+    console.error("PDF EXPORT ERROR:", err);
+    res.status(500).json({ message: "Failed to export PDF" });
+  }
 };
