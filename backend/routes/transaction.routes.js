@@ -13,8 +13,10 @@ const {
   getCategorySummary,
   getMonthlySummary,
   getSummary,
+   getRepeatSpending,
   exportTransactionsCSV,
   exportTransactionsPDF
+ 
 } = require("../controllers/transaction.controller");
 
 
@@ -33,11 +35,14 @@ console.log("TRANSACTION CONTROLLERS:", {
 router.post("/", auth, upload.single("receipt"), createTransaction);
 router.get("/", auth, getTransactions);
 
+
+router.get("/repeat-spending",auth,getRepeatSpending);
 /* ANALYTICS */
 router.get("/summary", auth, getSummary);
 router.get("/summary/income-expense", auth, getIncomeExpenseSummary);
 router.get("/summary/category", auth, getCategorySummary);
 router.get("/summary/monthly", auth, getMonthlySummary);
+
 
 /* EXPORTS */
 router.get("/export/csv", auth, exportTransactionsCSV);

@@ -3,7 +3,8 @@ const router = express.Router();
 const auth = require("../middleware/auth.middleware");
 const {
   setBudget,
-  getBudgetStatus
+  getBudgetStatus,
+  getBudgetSuggestions
 } = require("../controllers/budget.controller");
 router.get("/test", (req, res) => {
   res.send("budget route working");
@@ -11,5 +12,6 @@ router.get("/test", (req, res) => {
 
 router.post("/", auth, setBudget);
 router.get("/status", auth, getBudgetStatus);
+router.get("/suggestions", auth, getBudgetSuggestions);
 
 module.exports = router;

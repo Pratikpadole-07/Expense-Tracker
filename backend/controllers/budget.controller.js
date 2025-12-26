@@ -109,3 +109,61 @@ exports.getBudgetStatus = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch budget status" });
   }
 };
+
+exports.getBudgetSuggestions = async (req, res) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+
+    // current month
+    const now = new Date();
+    const currentMonth = now.toISOString().slice(0, 7);
+
+    // last month range
+    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const end = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    // categories where budget already exists
+    const existingBudgets = await Budget.find({
+      userId,
+      month: currentMonth
+    }).select("category");
+
+    const excludedCategories = existingBudgets.map(b => b.category);
+
+    // aggregate last month spending
+    const suggestions = await Transaction.aggregate([
+      {
+        $match: {
+          userId,
+          type: "expense",
+          date: { $gte: start, $lt: end },
+          category: { $nin: excludedCategories }
+        }
+      },
+      {
+        $group: {
+          _id: "$category",
+          total: { $sum: "$amount" }
+        }
+      },
+      {
+        $project: {
+          category: "$_id",
+          _id: 0,
+          avgMonthlySpend: "$total"
+        }
+      }
+    ]);
+
+    // apply buffer (10%)
+    const result = suggestions.map(s => ({
+      category: s.category,
+      recommendedLimit: Math.round(s.avgMonthlySpend * 1.1)
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error("BUDGET SUGGESTION ERROR:", err);
+    res.status(500).json({ message: "Failed to generate suggestions" });
+  }
+};

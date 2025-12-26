@@ -266,3 +266,54 @@ exports.exportTransactionsPDF = async (req, res) => {
     res.status(500).json({ message: "Failed to export PDF" });
   }
 };
+
+/* =========================
+   REPEAT SPENDING INTELLIGENCE
+   ========================= */
+exports.getRepeatSpending = async (req, res) => {
+  try {
+    const start = new Date();
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + 1);
+
+    const data = await Transaction.aggregate([
+      {
+        $match: {
+          userId: new mongoose.Types.ObjectId(req.user.id),
+          type: "expense",
+          date: { $gte: start, $lt: end }
+        }
+      },
+      {
+        $group: {
+          _id: "$category",
+          count: { $sum: 1 },
+          totalAmount: { $sum: "$amount" },
+          avgAmount: { $avg: "$amount" }
+        }
+      },
+      {
+        $match: {
+          count: { $gte: 3 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          category: "$_id",
+          count: 1,
+          totalAmount: 1,
+          avgAmount: 1
+        }
+      }
+    ]);
+
+    res.json(data);
+  } catch (err) {
+    console.error("REPEAT SPENDING ERROR:", err);
+    res.status(500).json({ message: "Failed to analyze spending" });
+  }
+};

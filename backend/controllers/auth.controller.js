@@ -19,7 +19,7 @@ exports.register = async (req, res) => {
   await User.create({
     name,
     email,
-    password: hashedPassword,
+    password: hashedPassword
   });
 
   res.status(201).json({ message: "User registered successfully" });
@@ -28,10 +28,7 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   const { email, password } = req.body;
 
-  // 1. user is declared FIRST
   const user = await User.findOne({ email });
-
-  // 2. user is checked AFTER declaration
   if (!user) {
     return res.status(400).json({ message: "Invalid credentials" });
   }
@@ -48,4 +45,12 @@ exports.login = async (req, res) => {
   );
 
   res.json({ token });
+};
+
+exports.getMe = async (req, res) => {
+  res.json({
+    id: req.user._id,
+    email: req.user.email,
+    name: req.user.name
+  });
 };
